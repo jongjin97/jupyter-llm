@@ -103,6 +103,12 @@ class JupyterExecutor:
                     else:
                         stderr += content['text']
 
+                # '팻말'에 해당하는 'execute_result' 메시지를 확인합니다.
+                if msg_type == 'execute_result':
+                    # 결과 데이터 중 일반 텍스트(text/plain) 표현을 가져옵니다.
+                    if 'data' in content and 'text/plain' in content['data']:
+                        stdout += content['data']['text/plain'] + '\n'
+
                 # 에러 메시지를 처리
                 if msg_type == 'error':
                     stderr += f"{content['ename']}: {content['evalue']}\n"
