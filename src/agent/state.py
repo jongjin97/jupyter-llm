@@ -6,7 +6,9 @@ class AgentState(TypedDict):
     task: str
     plan: List[str]
     executed_code: str
-    observation: str
+    # observation: str
+    stdout: str
+    stderr: str
     kernel_executor: JupyterExecutor
     notebook_path: str
     notebook: NotebookNode

@@ -61,7 +61,7 @@ class JupyterExecutor:
         result = self.execute(creation_code)
         print(result)
 
-    def execute(self, code: str, timeout: int = 30) -> str:
+    def execute(self, code: str, timeout: int = 30) -> dict:
         """
         주어진 코드를 커널에서 실행하고, 그 결과를 정리된 문자열로 반환합니다.
 
@@ -70,10 +70,10 @@ class JupyterExecutor:
             timeout (int): 각 메시지를 기다릴 최대 시간 (초).
 
         Returns:
-            str: 표준 출력(stdout)과 표준 에러(stderr)를 포함한 실행 결과.
+            str: stdout과 stderr를 분리된 딕셔너리로 반환
         """
         if not self.is_alive():
-            return "Kernel is not running."
+            return {"stdout": "", "stderr": "Kernel is not running."}
 
         # 실행 요청 보내기
         self.kc.execute(code)
@@ -120,11 +120,14 @@ class JupyterExecutor:
                 break
 
         # 결과를 하나의 문자열로 정리하여 반환
-        observation = f"--- STDOUT ---\n{stdout}\n"
-        if stderr:
-            observation += f"--- STDERR --- (Error Occurred)\n{stderr}\n"
+        # observation = f"--- STDOUT ---\n{stdout}\n"
+        # if stderr:
+        #     observation += f"--- STDERR --- (Error Occurred)\n{stderr}\n"
 
-        return observation.strip()
+        return {
+            "stdout": stdout.strip(),
+            "stderr": stderr.strip()
+        }
 
     def shutdown(self):
         """

@@ -31,8 +31,9 @@ def planner_node(state: AgentState) -> dict:
             ("human",
              "User's Task: {task}\n\n"
              "Previously Executed Code:\n```python\n{executed_code}\n```\n\n"
-             "Observation from Last Execution:\n{observation}\n\n"
-             "Based on the above, what is the next single step of code to execute?"),
+             "Output from last execution (STDOUT):\n{stdout}\n\n"
+             "Error from last execution (STDERR):\n{stderr}\n\n"
+             "Based on the above, what is the next single step of code to execute? If there was an error in STDERR, try to fix it."),
         ]
     )
     # 사용할 언어 모델 정의
@@ -67,27 +68,45 @@ def code_executor_node(state: AgentState):
 
     # 3. 코드를 실행합니다.
     executor = state['kernel_executor']
-    observation = executor.execute(code_to_run)
+    result = executor.execute(code_to_run)
+
+    # stdout 결과가 잇다면, name='stdout'인 stream 객체를 만들어 추가
+    if result['stdout']:
+        stdout_output = new_output(
+            output_type="stream",
+            name="stdout",
+            text=result['stdout']
+        )
+        cell.outputs.append(stdout_output)
+
+    # stderr 결과가 있다면, name='stderr'인 stream 객체를 만들어 추가
+    if result['stderr']:
+        stderr_output = new_output(
+            output_type="stream",
+            name="stderr",
+            text=result['stderr']
+        )
+        cell.outputs.append(stderr_output)
 
     # 추가 실행 결과를 'Output' 객체로 만듭니다.
     # 가장 일반적인 'stream' 타입의 출력으로 만듭니다.
-    output = new_output(
-        output_type="stream",
-        name="stdout", # 표준 출력
-        text=observation, # executor가 반환한 결과 문자열
-    )
-    cell.outputs.append(output)
+    # output = new_output(
+    #     output_type="stream",
+    #     name="stdout", # 표준 출력
+    #     text=observation, # executor가 반환한 결과 문자열
+    # )
+    # cell.outputs.append(output)
     # 4. 변경된 노트북 객체를 파일에 다시 씁니다. (저장)
     try:
-        print(notebook)
         with open(notebook_path, 'w', encoding='utf-8') as f:
             nbformat.write(notebook, f)
     except Exception as e:
-        observation += f"\n\n경고: 노트북 파일 저장 실패 - {e}"
+        result["stderr"] += f"\n\n경고: 노트북 파일 저장 실패 - {e}"
 
     # 5, 상태를 업데이트하여 반환합니다.
     return {
         "executed_code": code_to_run,
-        "observation": observation,
+        "stdout": result["stdout"],
+        "stderr": result["stderr"],
         "notebook": notebook
     }

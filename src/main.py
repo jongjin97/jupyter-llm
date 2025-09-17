@@ -39,7 +39,8 @@ def main():
             "kernel_executor": executor,
             "plan": [],
             "executed_code" : "",
-            "observation": "",
+            "stderr": "",
+            "stdout": "",
         }
 
         # LangGraph 워크플로우를 생성(컴파일)합니다.
@@ -56,8 +57,11 @@ def main():
             if "plan" in state_update and state_update["plan"]:
                 print(f"🤔 계획:\n{state_update['plan'][-1]}")
 
-            if "observation" in state_update:
-                print(f"👀 관찰 결과:\n{state_update['observation']}")
+            if "stdout" in state_update:
+                print(f"👀 관찰 결과:\n{state_update['stdout']}")
+
+            if "stderr" in state_update:
+                print(f"👀 관찰 결과:\n{state_update['stderr']}")
 
         print("\n--- 🎉 모든 작업이 완료되었습니다 ---")
 
