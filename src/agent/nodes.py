@@ -20,6 +20,22 @@ def planner_node(state: AgentState) -> dict:
     LLM을 사용하여 사용자의 요청과 이전 실행 결과를 바탕으로 다음 단계를 계획합니다.
     (AI 에이전트의 '두뇌' 역할)
     """
+    # 상태에서 노트북 객체를 가져와 최근 셀들의 내용을 추출합니다.
+    notebook = state.get("notebook")
+    recent_cells_source = []
+    if notebook and notebook.cells:
+        # 마지막 3개의 셀 내용만 가져옵니다.
+        num_recent_cells = 3
+        for cell in notebook.cells[-num_recent_cells:]:
+            if cell.cell_type == 'code':
+                # 보기 좋게 형식화하여 리스트에 추가
+                recent_cells_source.append(f"# Previous Code Cell:\n{cell.source}")
+
+    # 리스트를 하나의 문자열로 합칩니다.
+    formatted_recent_cells = "\n---\n".join(recent_cells_source)
+    # --- ✨ 여기까지 ---
+
+
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system",
@@ -27,9 +43,14 @@ def planner_node(state: AgentState) -> dict:
              "Your goal is to complete the user's task by planning and executing Python code. "
              "Review the history of previously executed code and its observations to decide the next step. "
              "If you encounter a ModuleNotFoundError, you must generate a `!pip install` command to install the missing library. "
-             "When the user's entire task is complete, return 'FINISH' in the code field to end the session."),
+             "When the user's entire task is complete, return 'FINISH' in the code field to end the session."
+             "\n\n--- IMPORTANT RULES ---\n"
+             "1. If the user asks for a plot, visualization, or graph using matplotlib, you MUST execute `%matplotlib inline` as the very first step before any other code."
+             "2. After setting the backend, you can proceed with importing libraries and generating the plot code."),
             ("human",
              "User's Task: {task}\n\n"
+             "--- RECENT NOTEBOOK CELLS ---\n"
+             "{recent_cells}\n\n" 
              "Previously Executed Code:\n```python\n{executed_code}\n```\n\n"
              "Output from last execution (STDOUT):\n{stdout}\n\n"
              "Error from last execution (STDERR):\n{stderr}\n\n"
@@ -43,7 +64,13 @@ def planner_node(state: AgentState) -> dict:
     structured_llm = llm.with_structured_output(CodePlan)
 
     # 프롬프트를 채워서 LLM 호출
-    response = structured_llm.invoke(prompt.format(**state))
+    response = structured_llm.invoke(prompt.format(
+        task=state["task"],
+        recent_cells=formatted_recent_cells,
+        executed_code=state["executed_code"],
+        stdout=state["stdout"],
+        stderr=state["stderr"],
+    ))
 
     # 결정된 계획을 상태에 업데이트하여 반환
     return {"plan": [response.code]}
@@ -56,7 +83,7 @@ def code_executor_node(state: AgentState):
     code_to_run = state['plan'][-1]
 
     if code_to_run == "FINISH":
-        return {"observation": "작업 완료."}
+        return {"stdout": "작업 완료."}
 
     # 1. 상태에서 노트북 객체와 경로를 가져옵니다.
     notebook = state['notebook']
@@ -78,6 +105,17 @@ def code_executor_node(state: AgentState):
             text=result['stdout']
         )
         cell.outputs.append(stdout_output)
+
+    # 리치 출력(이미지 등)을 추가
+    if result['outputs']:
+        # print("이미지 있음")
+        for output_content in result['outputs']:
+            # nbformat이 요구하는 'data', 'metadata' 형식을 그대로 전달
+            cell.outputs.append(new_output(
+                output_type=output_content.get('header', {}).get('msg_type', 'display_data'),
+                data=output_content.get('data', {}),
+                metadata=output_content.get('metadata', {})
+            ))
 
     # stderr 결과가 있다면, name='stderr'인 stream 객체를 만들어 추가
     if result['stderr']:

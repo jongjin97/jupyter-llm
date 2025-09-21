@@ -25,9 +25,9 @@ class JupyterExecutor:
             print("✅ Jupyter Kernel is ready and connected.")
 
             # 초기 노트북 생성 메서드 호출
-            if create_notebook_on_start:
-                print(f"📄 Creating initial notebook: {create_notebook_on_start}...")
-                self._create_initial_notebook(create_notebook_on_start)
+            # if create_notebook_on_start:
+            #     print(f"📄 Creating initial notebook: {create_notebook_on_start}...")
+            #     self._create_initial_notebook(create_notebook_on_start)
 
         except Exception:
             print("🔥 Failed to start or connect to the kernel.")
@@ -59,7 +59,6 @@ class JupyterExecutor:
         """
         # execute 메서드를 재사용하여 코드를 실행
         result = self.execute(creation_code)
-        print(result)
 
     def execute(self, code: str, timeout: int = 30) -> dict:
         """
@@ -73,20 +72,20 @@ class JupyterExecutor:
             str: stdout과 stderr를 분리된 딕셔너리로 반환
         """
         if not self.is_alive():
-            return {"stdout": "", "stderr": "Kernel is not running."}
+            return {"stdout": "", "stderr": "Kernel is not running.", "outputs": []}
 
         # 실행 요청 보내기
         self.kc.execute(code)
 
         stdout = ""
         stderr = ""
-
+        outputs = []
         # 실행이 완료될 때까지 커널로부터 메시지를 받아 처리
         while True:
             try:
                 # IOPub 채널에서 메시지를 가져옵니다.
                 msg = self.kc.get_iopub_msg(timeout=timeout)
-
+                # print(msg)
                 msg_type = msg['header']['msg_type']
                 content = msg['content']
 
@@ -103,8 +102,9 @@ class JupyterExecutor:
                     else:
                         stderr += content['text']
 
-                # '팻말'에 해당하는 'execute_result' 메시지를 확인합니다.
-                if msg_type == 'execute_result':
+                # 'execute_result'와 'display_data'를 원본 그대로 outputs 리스트에 추가
+                if msg_type in ('execute_result', 'display_data'):
+                    outputs.append(content)
                     # 결과 데이터 중 일반 텍스트(text/plain) 표현을 가져옵니다.
                     if 'data' in content and 'text/plain' in content['data']:
                         stdout += content['data']['text/plain'] + '\n'
@@ -123,10 +123,11 @@ class JupyterExecutor:
         # observation = f"--- STDOUT ---\n{stdout}\n"
         # if stderr:
         #     observation += f"--- STDERR --- (Error Occurred)\n{stderr}\n"
-
+        print(outputs)
         return {
             "stdout": stdout.strip(),
-            "stderr": stderr.strip()
+            "stderr": stderr.strip(),
+            "outputs": outputs
         }
 
     def shutdown(self):
