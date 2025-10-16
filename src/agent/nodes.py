@@ -8,6 +8,7 @@ from langchain_openai import ChatOpenAI
 from typing import List, Literal
 from src.tools.jupyter_executor import JupyterExecutor
 
+
 class SuggestedOptions(BaseModel):
     """A list of suggested next steps for the user to choose from."""
     options: List[str] = Field(description="A concise list of 3-5 logical next steps.")
@@ -16,23 +17,27 @@ class CodePlan(BaseModel):
     code: str = Field(description="Jupyter 커널에서 실행할 단일 Python 코드 블록.")
     reasoning: str = Field(description="이 코드가 주어진 작업을 어떻게 수행하는지에 대한 간략한 설명.")
 
-
 class Route(BaseModel):
-    """The next node to route to."""
-    destination: Literal["simple_task", "complex_task"] = Field(
-        description="The destination to route to based on task complexity.")
-
+    """The routing decision for the user's task."""
+    destination: Literal["simple_task", "complex_task"] = Field(description="The destination to route to based on task complexity.")
+    task_type: Literal["file_system", "data_analysis", "visualization", "ml_engineering", "general"] = Field(description="The specific expertise required for the task.")
 
 def router_node(state: AgentState) -> dict:
     """
-    사용자의 작업을 분석하여 단순 작업인지 복잡한 작업인지 분류합니다.
+    [역할: 총괄 매니저]
+    사용자의 작업을 분석하여 '단순/복잡' 여부와 필요한 '전문가 유형'을 분류합니다.
     """
     prompt = ChatPromptTemplate.from_messages([
         ("system",
-         "You are an expert at classifying user requests. "
-         "A 'simple_task' is a request that can be accomplished in a single, obvious step of code, like listing files or loading a known file. "
-         "A 'complex_task' is a vague, multi-step request that requires exploration or human guidance, such as 'analyze this data' or 'preprocess the data for machine learning'. "
-         "Based on the user's task, respond with the appropriate destination."),
+         "You are an expert at classifying user requests for a Python coding agent. "
+         "First, determine if the task is 'simple_task' (can be done in one obvious step) or 'complex_task' (is vague and needs user feedback). "
+         "Second, classify the task into one of the following expertise types: "
+         "- 'file_system': For tasks involving file or directory listing, reading, writing (os, glob, pathlib). "
+         "- 'data_analysis': For tasks involving data manipulation, cleaning, and analysis (pandas, numpy). "
+         "- 'visualization': For tasks involving plotting and creating charts (matplotlib, seaborn). "
+         "- 'ml_engineering': For tasks involving machine learning model training and evaluation (scikit-learn). "
+         "- 'general': For any other general Python coding task. "
+         "Respond with both the destination and the task_type."),
         ("human", "User's task: {task}")
     ])
     llm = ChatOpenAI(model="gpt-5-mini", temperature=0)
@@ -41,7 +46,7 @@ def router_node(state: AgentState) -> dict:
     route = structured_llm.invoke(prompt.format(task=state["task"]))
 
     # 다음 경로를 반환합니다. LangGraph는 이 값을 사용하여 분기합니다.
-    return {"destination": route.destination}
+    return {"destination": route.destination, "task_type": route.task_type}
 
 def option_suggester_node(state: AgentState) -> dict:
     """
@@ -128,21 +133,34 @@ def code_generator_node(state: AgentState) -> dict:
     # 과거 작업 내역 요약
     formatted_history = "\n---\n".join(state.get("history", []))
 
-    # 2. 역할이 단순화된 만큼, 프롬프트도 훨씬 더 명확하고 간결해집니다.
+    # 전문가 모드 결정
+    task_type = state.get("task_type", "general")
+
+    # 각 전문가 모드에 맞는 시스템 프롬프트를 정의합니다.
+    expert_prompts = {
+        "file_system": "You are a Python expert specializing in file system operations. Use `os`, `glob`, and `pathlib` to handle file and directory tasks efficiently and safely.",
+        "data_analysis": "You are a senior data analyst. Your expertise is in using `pandas` and `numpy` for data manipulation, cleaning, aggregation, and analysis. Always aim for idiomatic pandas code.",
+        "visualization": "You are a data visualization specialist. Use `matplotlib` and `seaborn` to create clear and insightful charts. **CRITICAL: You MUST execute `%matplotlib inline` before any plotting commands.**",
+        "ml_engineering": "You are a machine learning engineer. Your specialty is using `scikit-learn` to build preprocessing pipelines, train models, and evaluate their performance. Use standard variable names like `X_train`, `y_train`.",
+        "general": "You are a general-purpose, highly skilled Python code generation tool. Write clean, efficient, and correct Python code to accomplish the given task."
+    }
+
+    # 선택된 전문가 모드에 맞는 시스템 프롬프트를 가져옵니다.
+    system_prompt = expert_prompts.get(task_type, expert_prompts["general"])
+    # 역할이 단순화된 만큼, 프롬프트도 훨씬 더 명확하고 간결해집니다.
     prompt = ChatPromptTemplate.from_messages(
         [
             ("system",
-             "You are a highly skilled Python code generation tool that also functions as an expert debugger. "
-             "\n\n--- YOUR WORKFLOW ---\n"
-             "1. **Analyze:** Review the `Task To Execute Now`."
-             "2. **Review Context:** Look at the `Recent Notebook Cells` and `History`."
-             "3. **Review Last Result:** MOST IMPORTANTLY, check the `STDERR` from the last execution."
-             "4. **Decide & Plan:**"
-             "   - **If `STDERR` contains a critical error:** Your ONLY goal is to write the Python code that fixes that specific error. Do not do anything else."
-             "   - **If `STDERR` is empty:** Write the Python code that accomplishes the `Task To Execute Now`."
-             "\n\n--- RULES ---\n"
-             " - If a library is needed, install it with `!pip install`."
-             " - If a plot is needed, use `%matplotlib inline` first."),
+             f"{system_prompt}"
+             "\n\n--- YOUR WORKFLOW & RULES ---\n"
+             "1. **Analyze & Plan:** Review all context and the `Task To Execute Now`."
+             "2. **Code Generation:** Write the Python code to accomplish the task."
+             "3. **Self-Testing (CRITICAL):** After writing the main logic (like a function or a complex transformation), you MUST add a few lines of simple test code (`assert` or `print` checks) to verify that your code works as expected. This helps catch errors early."
+             "   - *Example:* If you create a function `def add(a, b): ...`, you should add `assert add(3, 5) == 8` afterwards."
+             "4. **Error Handling:** If the previous step had an error (`STDERR` is not empty), your only goal is to fix that error."
+             "\n\n--- OTHER RULES ---\n"
+             " - If a library is needed, `!pip install` it."
+             " - If you need to plot, execute `%matplotlib inline` first."),
             ("human",
              "--- Context: Recent Notebook Cells ---\n"
              "{recent_cells}\n\n"

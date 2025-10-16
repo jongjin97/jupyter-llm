@@ -1,6 +1,7 @@
 from typing import TypedDict, List
 from nbformat import NotebookNode
 from src.tools.jupyter_executor import JupyterExecutor
+from typing import TypedDict, List, Literal
 
 class AgentState(TypedDict):
     """
@@ -24,3 +25,7 @@ class AgentState(TypedDict):
     history: List[str]
 
     suggested_options: List[str]
+
+    # 라우터가 결정한 작업 종류와 전무가 모드를 저장
+    destination: str
+    task_type: Literal["file_system", "data_analysis", "visualization", "ml_engineering", "general"]
