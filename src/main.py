@@ -12,16 +12,15 @@ from src.agent.state import AgentState
 
 def main():
     """
-    'Human-in-the-loop' AI 에이전트의 전체 실행을 관장하는 메인 함수.
-    LangGraph의 내장 상태 관리(체크포인트)를 사용하여 안정성을 높인 최종 버전.
+    최종 안정화 버전의 'Human-in-the-loop' AI 에이전트 실행 함수.
+    'stream_mode="values"'에 맞춰 이벤트 처리 로직을 수정한 버전.
     """
-    # --- 1. 초기 설정 ---
     load_dotenv()
     if not os.getenv("OPENAI_API_KEY"):
-        print("🛑 오류: OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
+        print("🛑 OPENAI_API_KEY가 설정되지 않았습니다.")
         return
 
-    notebook_filename = "titanic_notebook_v7.ipynb"
+    notebook_filename = "persistent_agent_notebook.ipynb"
     try:
         with open(notebook_filename, 'r', encoding='utf-8') as f:
             notebook = nbformat.read(f, as_version=4)
@@ -34,49 +33,65 @@ def main():
 
     executor = None
     try:
-        # --- 2. 리소스 및 에이전트 준비 ---
         executor = JupyterExecutor()
         app = create_agent_workflow(executor=executor)
 
-        # ✨ 수정된 부분: 대화의 전체 생명주기를 관리할 고유 ID와 config 생성
         thread_id = str(uuid.uuid4())
         config = {"configurable": {"thread_id": thread_id}}
 
-        # 최초 상태를 LangGraph의 체크포인트 시스템에 업데이트합니다.
-        initial_state = {
-            "notebook": notebook,
-            "notebook_path": notebook_filename,
-            # "kernel_executor": executor,
-            "history": []
-        }
+        # ✨ 수정된 부분: history는 세션 내내 유지됩니다.
+        initial_state = {"notebook": notebook, "notebook_path": notebook_filename, "history": []}
         app.update_state(config, initial_state)
 
         print("\n🤖 AI 에이전트와의 대화를 시작합니다. 종료하려면 'exit' 또는 'quit'를 입력하세요.")
 
-        # --- 3. 대화형 세션 루프 ---
         while True:
             task = input("\n▶ 당신의 명령: ")
             if task.lower() in ["exit", "quit"]:
                 print("👋 세션을 종료합니다.")
                 break
 
-            print("\n--- 🤔 옵션 제안 중... ---")
+            # ✨ 수정된 부분: history를 더 이상 초기화하지 않고 task만 전달합니다.
+            events = app.stream({"task": task}, config, stream_mode="values")
 
-            # ✨ 1단계: 'suggester' 노드까지 실행하여 옵션 제안받기
-            events = app.stream({"task": task, "history": [], "suggested_options": []}, config, stream_mode="values")
-            suggester_output_state = None
+            is_complex_task = False
+            suggested_options = []
+
+            print("\n--- 🚀 AI 에이전트 작업 시작 ---")
             for event in events:
-                print(f"event: {event}")
-                if event.get("suggested_options"):
-                    suggester_output_state = event
-                    break  # 옵션이 생성되었으면 루프 중단
+                # ✨ --- 여기가 핵심 수정 부분 ---
+                # 'event'는 상태 딕셔너리 그 자체입니다. 노드 이름을 추측할 필요 없이 직접 키를 확인합니다.
 
-            # ✨ 2단계: 사용자에게 옵션 보여주고 선택받기
-            if not suggester_output_state:
-                print("😅 제안할 옵션을 생성하지 못했습니다. 다른 명령을 시도해주세요.")
+                # 'plan'이 새로 생겼다면 generator가 실행된 것입니다.
+                if event.get("plan"):
+                    print("\n✅ 다음 단계: [ generator ]", flush=True)
+                    print("-" * 25, flush=True)
+                    print(f"🤔 계획:\n{event['plan'][-1]}", flush=True)
+                # 'executed_code'가 생겼다면 executor가 실행된 것입니다.
+                elif event.get("executed_code"):
+                    print("\n✅ 다음 단계: [ executor ]", flush=True)
+                    print("-" * 25, flush=True)
+                    if event.get("stdout"):
+                        print(f"👀 STDOUT:\n{event['stdout']}", flush=True)
+                    if event.get("stderr"):
+                        print(f"🔥 STDERR:\n{event['stderr']}", flush=True)
+
+                # 'suggester' 노드에서 중단되었는지 확인
+                if event.get("suggested_options"):
+                    is_complex_task = True
+                    suggested_options = event["suggested_options"]
+                    break
+
+            # --- ✨ 여기까지 ---
+
+            if not is_complex_task:
+                print("\n--- 🎉 작업 완료 ---")
                 continue
 
-            suggested_options = suggester_output_state.get("suggested_options", [])
+            if not suggested_options:
+                print("😅 제안할 옵션이 없습니다. 다른 명령을 시도해주세요.")
+                continue
+
             print("\n🤔 다음 중 어떤 작업을 수행할까요?")
             for i, opt in enumerate(suggested_options):
                 print(f"  [{i + 1}] {opt}")
@@ -98,11 +113,20 @@ def main():
 
             print(f"\n--- 🚀 '{selected_task}' 작업 시작 ---")
 
-            # ✨ 3단계: 사용자의 선택으로 그래프 실행 '재개'하기
-            # 동일한 config를 사용하면 LangGraph가 알아서 중단된 지점부터 실행을 이어갑니다.
-            for event in app.stream({"task": selected_task}, config, stream_mode="values"):
-                step_name = list(event.keys())[0]
-                print(f"\n✅ 다음 단계: [ {step_name} ]", flush=True)
+            execution_events = app.stream({"task": selected_task}, config, stream_mode="values")
+            for event in execution_events:
+                # ✨ 수정된 부분: 재개 시에도 동일한 출력 로직 적용
+                if event.get("plan"):
+                    print("\n✅ 다음 단계: [ generator ]", flush=True)
+                    print("-" * 25, flush=True)
+                    print(f"🤔 계획:\n{event['plan'][-1]}", flush=True)
+                elif event.get("executed_code"):
+                    print("\n✅ 다음 단계: [ executor ]", flush=True)
+                    print("-" * 25, flush=True)
+                    if event.get("stdout"):
+                        print(f"👀 STDOUT:\n{event['stdout']}", flush=True)
+                    if event.get("stderr"):
+                        print(f"🔥 STDERR:\n{event['stderr']}", flush=True)
 
             print("\n--- 🎉 작업 완료 ---")
 
