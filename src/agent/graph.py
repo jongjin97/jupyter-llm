@@ -39,16 +39,11 @@ def after_execution_router(state: AgentState) -> str:
     executor 실행 후, 오류 발생 여부 및 작업 종류에 따라 다음 경로를 결정합니다.
     """
     stderr = state.get("stderr", "")
-    print(f"stderr: {stderr}")
     # 1. 심각한 오류가 발생했는지 먼저 확인합니다.
     if has_critical_error(stderr):
         print("🔥 심각한 오류 감지. 수정 계획을 위해 generator로 돌아갑니다.")
         return "fix_error"
 
-    # 2. 오류가 없다면, 기존 로직대로 작업 종류에 따라 분기합니다.
-    # if state.get("task_type") == "simple_task":
-    #     return "end"
-    # else:
     return "end"
 
 def should_continue(state: AgentState) -> str:

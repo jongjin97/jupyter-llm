@@ -123,7 +123,6 @@ class JupyterExecutor:
         # observation = f"--- STDOUT ---\n{stdout}\n"
         # if stderr:
         #     observation += f"--- STDERR --- (Error Occurred)\n{stderr}\n"
-        print(outputs)
         return {
             "stdout": stdout.strip(),
             "stderr": stderr.strip(),

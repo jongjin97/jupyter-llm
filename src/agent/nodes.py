@@ -89,7 +89,6 @@ def option_suggester_node(state: AgentState) -> dict:
          "{history}\n\n"
          "Based on all the information above, what are the best next steps for the user to choose from? Respond with a list of options.")
     ])
-    # --- ✨ 여기까지 ---
 
     llm = ChatOpenAI(model="gpt-5-mini", temperature=0)
     structured_llm = llm.with_structured_output(SuggestedOptions)
@@ -230,7 +229,7 @@ def code_executor_node(state: AgentState, executor: JupyterExecutor):
 
     # 리치 출력(이미지 등)을 추가
     if result['outputs']:
-        # print("이미지 있음")
+
         for output_content in result['outputs']:
             # nbformat이 요구하는 'data', 'metadata' 형식을 그대로 전달
             cell.outputs.append(new_output(
