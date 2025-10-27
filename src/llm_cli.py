@@ -76,6 +76,8 @@ def run_execution_graph(app, config, task_to_run, session_history, previous_even
 
     console.print("\n--- 🎉 작업 완료 ---", style="bold green")
 
+    return printed_plan
+
 
 # --- 메인 함수 ---
 def main():
@@ -195,7 +197,7 @@ def main():
                 console.print("작업이 취소되었습니다.", style="yellow")
                 continue
 
-            run_execution_graph(app, config, selected_task_for_execution, session_history, previous_event, printed_plan)
+            printed_plan = run_execution_graph(app, config, selected_task_for_execution, session_history, previous_event, printed_plan)
 
     except Exception as e:
         console.print(f"\n🛑 에이전트 실행 중 심각한 오류가 발생했습니다.", style="bold red")
