@@ -22,6 +22,12 @@ class Route(BaseModel):
     destination: Literal["simple_task", "complex_task"] = Field(description="The destination to route to based on task complexity.")
     task_type: Literal["file_system", "data_analysis", "visualization", "ml_engineering", "general"] = Field(description="The specific expertise required for the task.")
 
+class ErrorDecision(BaseModel):
+    """stderr 내용이 치명적인 오류인지 판단합니다."""
+    is_critical_error: bool = Field(
+        description="True: Traceback, SyntaxError, NameError 등 코드를 수정해야 하는 치명적인 오류. False: [notice]나 pip 업데이트 알림처럼 무시해도 되는 경고 또는 빈 문자열."
+    )
+
 def router_node(state: AgentState) -> dict:
     """
     [역할: 총괄 매니저]
@@ -274,3 +280,42 @@ def code_executor_node(state: AgentState, executor: JupyterExecutor):
         "notebook": notebook,
         "history": history
     }
+
+def error_classifier_node(state: AgentState) -> dict:
+    """
+    [Node] AI 기반의 오류 분류기 (AI 심판)
+    'stderr'와 '실행된 코드'를 함께 분석하여,
+    이것이 코드를 수정해야 하는 '치명적인 오류'인지 판단합니다.
+    """
+    stderr = state.get("stderr", "")
+    executed_code = state.get("executed_code", "")  # 실행된 코드를 가져옵니다.
+
+    # 프롬프트를 통해 LLM에게 명확한 판단 기준을 제시합니다.
+    prompt = ChatPromptTemplate.from_messages([
+        ("system",
+         "You are an expert error classifier. Your job is to analyze an error log (STDERR) *and* the code that produced it. "
+         "You must decide if the error is a CRITICAL, code-breaking error that requires fixing the code, or an IGNORABLE warning."
+         "\n\nCRITICAL errors include: Traceback, SyntaxError, NameError, TypeError, FileNotFoundError, etc."
+         "\nIGNORABLE warnings include: '[notice]', 'A new release of pip is available', deprecation warnings, etc."
+         "\nIf STDERR is empty, it is not a critical error."),
+        ("human",
+         "--- EXECUTED CODE ---\n"
+         "```python\n{code}\n```\n\n"
+         "--- STDERR ---\n{stderr}\n\n"
+         "Is this a critical error that requires fixing the code? Respond with boolean 'is_critical_error' only.")
+    ])
+
+    llm = ChatOpenAI(model="gpt-5-mini", temperature=0)  # 사용 가능한 모델로 설정
+    structured_llm = llm.with_structured_output(ErrorDecision)
+
+    # ✨ invoke 호출 시 executed_code를 함께 전달
+    decision = structured_llm.invoke(prompt.format(
+        code=executed_code,
+        stderr=stderr
+    ))
+
+    if decision.is_critical_error:
+        print("🔥 AI가 심각한 오류를 감지했습니다. 수정을 위해 generator로 돌아갑니다.")
+        return {"destination": "fix_error"}
+    else:
+        return {"destination": "no_error"}
